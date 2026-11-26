@@ -43,8 +43,11 @@ if (mode === "--remote") {
   }
   const etag = crypto.createHash("md5").update(sql).digest("hex");
   const init = await call("/import", { action: "init", etag });
-  const up = await fetch(init.upload_url, { method: "PUT", body: sql });
-  if (!up.ok) throw new Error(`upload HTTP ${up.status}`);
+  // No upload URL: D1 already holds a file with this etag (an earlier import of the same SQL); ingest it again.
+  if (init.upload_url) {
+    const up = await fetch(init.upload_url, { method: "PUT", body: sql });
+    if (!up.ok) throw new Error(`upload HTTP ${up.status}`);
+  }
   let st = await call("/import", { action: "ingest", etag, filename: init.filename });
   for (let i = 0; st.status !== "complete" && st.status !== "error" && i < 200; i++) {
     await new Promise((res) => setTimeout(res, 3000));
