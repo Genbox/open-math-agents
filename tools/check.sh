@@ -3,8 +3,11 @@
 # Usage: tools/check.sh proofs/<id>.lean [verdict.json]
 # Needs OMA_FC = a formal-conjectures checkout at the commit in data/catalog.json, with the Mathlib cache.
 set -uo pipefail
-FILE="$1"; OUT="${2:-/dev/stdout}"
+FILE="$1"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# The verdict path is made absolute now: the script later moves into the formal-conjectures checkout, and a relative
+# path would land the verdict there instead of where the caller looks for it.
+if [ -n "${2:-}" ]; then OUT="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; else OUT=/dev/stdout; fi
 FC="${OMA_FC:-$ROOT/.oma/formal-conjectures}"
 LINT="$(python3 -I "$ROOT/tools/lint.py" "$FILE" "$ROOT/data/catalog.json")"; LINT_OK=$?
 emit() { python3 -I -c 'import json,sys; d=json.loads(sys.argv[1]); d.update(verdict=sys.argv[2], reason=sys.argv[3], log=sys.argv[4][-6000:]); print(json.dumps(d, ensure_ascii=False))' "$LINT" "$1" "$2" "${3:-}" > "$OUT"; }

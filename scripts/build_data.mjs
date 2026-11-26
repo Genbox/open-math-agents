@@ -113,11 +113,12 @@ const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
 const PART = 12000;
 const parts = (s) => { const out = []; for (let i = 0; i < s.length || i === 0; i += PART) out.push(s.slice(i, i + PART)); return out; };
 const out = [
-  "DROP TABLE IF EXISTS problem;", "DROP TABLE IF EXISTS fts;", "DROP TABLE IF EXISTS upstream_file;", "DROP TABLE IF EXISTS meta;",
+  "DROP TABLE IF EXISTS problem;", "DROP TABLE IF EXISTS fts;", "DROP TABLE IF EXISTS upstream_file;",
   "CREATE TABLE problem (id TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (id, part));",
   "CREATE VIRTUAL TABLE fts USING fts5(id UNINDEXED, title, statement, decl, extra, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3 4');",
   "CREATE TABLE upstream_file (path TEXT NOT NULL, part INTEGER NOT NULL, content TEXT NOT NULL, PRIMARY KEY (path, part));",
-  "CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
+  // meta is shared with the MathOverflow part (version_mo): never dropped, or a core import would force a MathOverflow one.
+  "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);",
 ];
 const DETAIL = ["statement", "lean", "module", "file", "line", "category", "ref", "erdosState", "license", "authors", "area", "alsoIn", "formalizedHere"];
 for (const p of core) {
@@ -130,7 +131,7 @@ for (const p of core) {
 const files = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(ROOT, "data", "fc_files.json.gz"))).toString("utf8"));
 for (const [p, content] of Object.entries(files)) parts(content).forEach((s, i) => out.push(`INSERT INTO upstream_file VALUES (${q(p)}, ${i}, ${q(s)});`));
 const version = `${catalog.meta.upstreamCommit.slice(0, 12)}-${core.length}-${Object.keys(statements).length}`;
-out.push(`INSERT INTO meta VALUES ('version', ${q(version)});`);
+out.push(`INSERT OR REPLACE INTO meta VALUES ('version', ${q(version)});`);
 fs.writeFileSync(path.join(ROOT, "data", "gen", "catalog.sql"), out.join("\n") + "\n");
 fs.writeFileSync(path.join(ROOT, "data", "gen", "version.txt"), version + "\n");
 // ---- catalog-mo.sql -----------------------------------------------------------------------------------

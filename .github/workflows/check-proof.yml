@@ -17,17 +17,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Exactly one new file under proofs/ or reductions/
+      - name: Exactly one new file under proofs/, reductions/ or statements/
         id: diff
         run: |
           set -euo pipefail
-          BASE="${{ github.event.pull_request.base.sha }}"
-          git diff --name-status "$BASE"...HEAD > /tmp/diff.txt
+          # HEAD is GitHub's merge of the pull request into the current base: its first parent is that base, so this
+          # diff is exactly the pull request's change, however far main moved since the pull request was opened.
+          git diff --name-status HEAD^1 HEAD > /tmp/diff.txt
           cat /tmp/diff.txt
           [ "$(wc -l < /tmp/diff.txt)" = "1" ] || { echo "verdict=rejected" >> "$GITHUB_OUTPUT"; echo '{"verdict":"rejected","reason":"a pull request must add exactly one file under proofs/, reductions/ or statements/ and change nothing else"}' > verdict.json; exit 0; }
           read -r ST F < /tmp/diff.txt
           # Strict whitelist: the file name is attacker-controlled and is used in later steps.
-          if [ "$ST" != "A" ] || ! printf '%s' "$F" | grep -Eq "^(proofs|reductions)/[A-Za-z0-9_.'-]+\.lean$"; then
+          if [ "$ST" != "A" ] || ! printf '%s' "$F" | grep -Eq "^(proofs|reductions|statements)/[A-Za-z0-9_.'-]+\.lean$"; then
             echo '{"verdict":"rejected","reason":"the one change must be a new file proofs/<id>.lean, reductions/<id>.R<n>.lean or statements/<id>.lean (letters, digits, _ . - only)"}' > verdict.json; exit 0
           fi
           echo "file=$F" >> "$GITHUB_OUTPUT"
@@ -57,23 +58,28 @@ jobs:
       - name: Lean toolchain and Mathlib cache
         if: steps.lint.outputs.ok == '1'
         run: |
+          # Downloads from GitHub and Azure fail now and then (504s): retry each one before giving up.
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed: $*"; sleep $((i * 20)); done; return 1; }
           if ! command -v lake >/dev/null && [ ! -x ~/.elan/bin/lake ]; then
-            curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o /tmp/elan-init.sh
-            sh /tmp/elan-init.sh -y --default-toolchain none
+            retry curl -sSfL --retry 3 https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o /tmp/elan-init.sh
+            retry sh /tmp/elan-init.sh -y --default-toolchain none
           fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-          cd "$RUNNER_TEMP/fc" && ~/.elan/bin/lake exe cache get
+          cd "$RUNNER_TEMP/fc" && retry ~/.elan/bin/lake exe cache get
       - name: Compile and audit axioms
         if: steps.lint.outputs.ok == '1'
         env:
           FILE: ${{ steps.diff.outputs.file }}
         run: OMA_FC="$RUNNER_TEMP/fc" tools/check.sh "$FILE" verdict.json || true
       - name: Record PR number
+        # Also after a failed setup step, so the contributor always gets a verdict (a fault is re-run automatically).
+        if: ${{ !cancelled() }}
         run: |
           echo "${{ github.event.pull_request.number }}" > pr.txt
           [ -f verdict.json ] || echo '{"verdict":"fault","reason":"checker produced no verdict"}' > verdict.json
           python3 -I -c 'import json;d=json.load(open("verdict.json"));print(d["verdict"], "-", d["reason"])'
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
         with:
           name: verdict
           path: |
